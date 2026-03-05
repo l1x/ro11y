@@ -627,24 +627,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pz-o11y"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "bytes",
- "http",
- "libc",
- "pin-project-lite",
- "rand",
- "reqwest",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -816,6 +798,24 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ro11y"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytes",
+ "http",
+ "libc",
+ "pin-project-lite",
+ "rand",
+ "reqwest",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

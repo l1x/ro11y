@@ -2,6 +2,11 @@
 name = "ro11y"
 version = "0.1.0"
 edition = "2021"
+description = "Lightweight Rust observability. Hand-rolled OTLP protobuf over HTTP, built on tracing."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/l1x/ro11y"
+keywords = ["observability", "tracing", "otlp", "telemetry", "protobuf"]
+categories = ["development-tools::debugging", "development-tools::profiling"]
 
 [dependencies]
 blake3 = "1"
