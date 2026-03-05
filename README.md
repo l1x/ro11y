@@ -2,16 +2,51 @@
 
 Lightweight Rust observability. Hand-rolled OTLP protobuf over HTTP, built on [tracing](https://docs.rs/tracing).
 
-## What it does
+## Core and middleware
 
-- Exports traces and logs as native OTLP protobuf over HTTP — no gRPC, no `tonic`, no `prost`
-- Dual output: OTLP HTTP to [Vector](https://vector.dev) + JSON stderr (local dev / CloudWatch fallback)
-- Deterministic trace IDs from CloudFront request IDs via BLAKE3
-- RED metrics (request duration, count, errors) as structured log events
+ro11y has two layers:
+
+**Generic core** — works with any Rust application, not just HTTP servers:
+- Custom `tracing::Layer` that captures all spans and events
+- Encodes them as OTLP protobuf (`ExportTraceServiceRequest`, `ExportLogsServiceRequest`)
+- Ships via HTTP POST to any OTLP-compatible collector (Vector, Grafana Alloy, OTEL Collector)
+- Dual output: OTLP HTTP primary + JSON stderr fallback (local dev / CloudWatch)
+- Background exporter with 3-retry exponential backoff — telemetry never blocks your application
+- Process metrics (CPU, memory) via `/proc` polling on Linux
+
+**HTTP middleware** (optional) — framework-specific request instrumentation:
+- Tower middleware for Axum (built-in today)
+- Extracts CloudFront request IDs, generates deterministic trace IDs via BLAKE3
+- Creates request spans with method, path, status, latency
+- Emits RED metrics (request duration, count, errors)
 - W3C `traceparent` propagation for outbound requests
-- Tower middleware for Axum integration
-- Fire-and-forget with 3-retry exponential backoff — telemetry never blocks your service
-- 7 direct dependencies, ~2000 lines of code
+
+Any `tracing` span or event from anywhere in your application — HTTP handlers, background tasks, queue consumers, batch jobs — flows through the same OTLP export pipeline.
+
+## Signals: what's standard, what's not
+
+| Signal  | Format                         | Standard |
+|---------|--------------------------------|----------|
+| Traces  | OTLP `ExportTraceServiceRequest` protobuf | Yes |
+| Logs    | OTLP `ExportLogsServiceRequest` protobuf  | Yes |
+| Metrics | Structured log events with `metric`/`type`/`value` fields | No |
+
+Traces and logs follow the [OTLP specification](https://opentelemetry.io/docs/specs/otlp/) and are encoded as native protobuf. Any OTLP-compatible backend can ingest them directly.
+
+Metrics are **not** OTLP `ExportMetricsServiceRequest`. Instead, they are emitted as structured `tracing::info!()` events:
+
+```rust
+tracing::info!(
+    metric = "http.server.request.duration",
+    r#type = "histogram",
+    value = 42.5,
+    method = "GET",
+    route = "/users/:id",
+    status = 200,
+);
+```
+
+These flow through the log pipeline and are converted to real metrics downstream by Vector's [`log_to_metric`](https://vector.dev/docs/reference/configuration/transforms/log_to_metric/) transform. This avoids the complexity of the OTLP metrics data model (histograms, exponential histograms, summaries, exemplars) at the cost of being non-standard at the wire level.
 
 ## Usage
 
@@ -19,6 +54,7 @@ Lightweight Rust observability. Hand-rolled OTLP protobuf over HTTP, built on [t
 use ro11y::{init, TelemetryConfig};
 use std::time::Duration;
 
+// Generic core — works for any application
 let _guard = init(TelemetryConfig {
     service_name: "my-service",
     service_version: env!("CARGO_PKG_VERSION"),
@@ -27,7 +63,15 @@ let _guard = init(TelemetryConfig {
     use_metrics_interval: Some(Duration::from_secs(30)),
 });
 
-// Tower middleware for Axum
+// All tracing spans/events are now exported as OTLP protobuf
+tracing::info_span!("process_job", job_id = 42).in_scope(|| {
+    tracing::info!("job completed");
+});
+```
+
+With HTTP middleware (Axum/Tower):
+
+```rust
 let app = axum::Router::new()
     .route("/health", axum::routing::get(health))
     .layer(ro11y::request_layer())       // inbound: request spans + RED metrics
@@ -37,7 +81,7 @@ let app = axum::Router::new()
 ## Pipeline
 
 ```
-Service (tracing) → ro11y (protobuf) → HTTP POST → Vector (OTLP source) → S3 Parquet
+Application (tracing) → ro11y (protobuf) → HTTP POST → Vector/Collector (OTLP) → storage
 ```
 
 ## Why not OpenTelemetry SDK?
@@ -48,6 +92,10 @@ Service (tracing) → ro11y (protobuf) → HTTP POST → Vector (OTLP source) �
 - gRPC bloat from `tonic`/`prost`
 
 ro11y hand-rolls the protobuf wire format (~200 lines). The format has been stable since 2008.
+
+## Dependencies
+
+7 direct dependencies. No `opentelemetry`, `tonic`, or `prost`.
 
 ## License
 
