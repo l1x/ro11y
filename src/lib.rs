@@ -3,12 +3,15 @@ pub(crate) mod otlp_layer;
 pub(crate) mod otlp_log;
 pub(crate) mod otlp_trace;
 pub(crate) mod proto;
+#[cfg(feature = "tower")]
 pub mod tower;
 pub mod trace_id;
 pub mod constants;
 pub(crate) mod use_metrics;
 
+#[cfg(feature = "tower")]
 pub use tower::propagation::PropagationLayer;
+#[cfg(feature = "tower")]
 pub use tower::request::CfRequestIdLayer;
 
 use std::time::Duration;
@@ -111,11 +114,13 @@ pub fn init(config: TelemetryConfig) -> TelemetryGuard {
 }
 
 /// Convenience: create a `CfRequestIdLayer` for incoming requests.
+#[cfg(feature = "tower")]
 pub fn request_layer() -> CfRequestIdLayer {
     CfRequestIdLayer
 }
 
 /// Convenience: create a `PropagationLayer` for outgoing requests.
+#[cfg(feature = "tower")]
 pub fn propagation_layer() -> PropagationLayer {
     PropagationLayer
 }
@@ -135,11 +140,13 @@ mod tests {
         };
     }
 
+    #[cfg(feature = "tower")]
     #[test]
     fn request_layer_constructs() {
         let _layer = request_layer();
     }
 
+    #[cfg(feature = "tower")]
     #[test]
     fn propagation_layer_constructs() {
         let _layer = propagation_layer();
