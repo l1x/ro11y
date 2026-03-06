@@ -8,6 +8,7 @@ use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 use tracing::field::Empty;
 
+use crate::constants::metrics;
 use crate::trace_id::{generate_span_id, generate_trace_id, hex_encode};
 
 /// Tower Layer that extracts `x-amz-cf-id` and wraps requests in a tracing span.
@@ -120,7 +121,7 @@ where
                         this.span.record("http.latency_ms", latency_ms);
 
                         tracing::info!(
-                            metric = "http.server.request.duration",
+                            metric = metrics::REQUEST_DURATION,
                             r#type = "histogram",
                             value = latency_ms,
                             method = %this.method,
@@ -128,7 +129,7 @@ where
                             status = status,
                         );
                         tracing::info!(
-                            metric = "http.server.request.count",
+                            metric = metrics::REQUEST_COUNT,
                             r#type = "counter",
                             value = 1u64,
                             method = %this.method,
@@ -137,7 +138,7 @@ where
                         );
                         if status >= 400 {
                             tracing::info!(
-                                metric = "http.server.error.count",
+                                metric = metrics::ERROR_COUNT,
                                 r#type = "counter",
                                 value = 1u64,
                                 method = %this.method,

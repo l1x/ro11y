@@ -5,6 +5,7 @@ pub(crate) mod otlp_trace;
 pub(crate) mod proto;
 pub mod tower;
 pub mod trace_id;
+pub mod constants;
 pub(crate) mod use_metrics;
 
 pub use tower::propagation::PropagationLayer;

@@ -237,7 +237,7 @@ harrow = ["dep:harrow-core"]
 Both implementations share the same core primitives (`generate_trace_id()`, `generate_span_id()`, `info_span!()`, RED metric events). The `OtlpLayer` captures spans regardless of which middleware created them.
 
 **Required API changes:**
-- Make `trace_id::hex_encode` public (currently `pub(crate)`)
+- ~~Make `trace_id::hex_encode` public (currently `pub(crate)`)~~ — **Done in v0.1.3**
 - Extract shared constants for span field names and metric event format
 
 **Tracked in:** [panzerotti#119](https://github.com/l1x/panzerotti/issues/119)
@@ -246,7 +246,9 @@ Both implementations share the same core primitives (`generate_trace_id()`, `gen
 
 ### 7.1 Make `hex_encode` Public
 
-`trace_id::hex_encode` is `pub(crate)` today. Both the Tower and Harrow middleware implementations need it to set `trace_id` and `span_id` as hex string fields on tracing spans. This should become `pub`.
+~~`trace_id::hex_encode` is `pub(crate)` today. Both the Tower and Harrow middleware implementations need it to set `trace_id` and `span_id` as hex string fields on tracing spans. This should become `pub`.~~
+
+**Resolved in v0.1.3:** `trace_id::hex_encode` is now `pub` as of v0.1.3. No further work needed here.
 
 ### 7.2 Shared Constants
 
@@ -360,8 +362,8 @@ See [docs/signals-and-architecture.svg](signals-and-architecture.svg) for a visu
 
 | Version | Scope |
 |---------|-------|
-| **v0.1.x** (current) | Core OTLP traces + logs, Tower middleware, hand-rolled protobuf, JSON stderr fallback |
-| **v0.2.0** | Feature-flagged middleware (Tower + Harrow), public `hex_encode`, shared field constants |
+| **v0.1.x** (current) | Core OTLP traces + logs, Tower middleware, hand-rolled protobuf, JSON stderr fallback. **v0.1.3:** made `trace_id::hex_encode` public; renamed `cf_id` to `request_id` throughout the public API. |
+| **v0.2.0** | Feature-flagged middleware (Tower + Harrow), shared field constants (note: public `hex_encode` already shipped in v0.1.3) |
 | **v0.3.0** | Native OTLP metrics (`ExportMetricsServiceRequest`), Counter + Gauge instruments |
 | **v0.4.0** | Histogram instrument with client-side bucketing, exemplar support |
 | **v1.0.0** | Stable API, full OTLP coverage (traces + logs + metrics), battle-tested at scale |
