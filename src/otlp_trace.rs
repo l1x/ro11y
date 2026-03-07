@@ -76,19 +76,19 @@ pub(crate) fn encode_any_value(buf: &mut Vec<u8>, val: &AnyValue) {
 }
 
 /// Encode a KeyValue: field 1 = key (string), field 2 = AnyValue (message).
-pub(crate) fn encode_key_value(buf: &mut Vec<u8>, kv: &KeyValue) {
+pub fn encode_key_value(buf: &mut Vec<u8>, kv: &KeyValue) {
     encode_string_field(buf, 1, &kv.key);
-    let mut val_buf = Vec::new();
-    encode_any_value(&mut val_buf, &kv.value);
-    encode_message_field(buf, 2, &val_buf);
+    encode_message_field_in_place(buf, 2, |buf| {
+        encode_any_value(buf, &kv.value);
+    });
 }
 
 /// Encode a Resource: field 1 = repeated KeyValue (attributes).
-pub(crate) fn encode_resource(buf: &mut Vec<u8>, attrs: &[KeyValue]) {
+pub fn encode_resource(buf: &mut Vec<u8>, attrs: &[KeyValue]) {
     for kv in attrs {
-        let mut kv_buf = Vec::new();
-        encode_key_value(&mut kv_buf, kv);
-        encode_message_field(buf, 1, &kv_buf);
+        encode_message_field_in_place(buf, 1, |buf| {
+            encode_key_value(buf, kv);
+        });
     }
 }
 
@@ -119,15 +119,15 @@ fn encode_span(buf: &mut Vec<u8>, span: &SpanData) {
     encode_fixed64_field(buf, 8, span.end_time_unix_nano);
 
     for kv in &span.attributes {
-        let mut kv_buf = Vec::new();
-        encode_key_value(&mut kv_buf, kv);
-        encode_message_field(buf, 9, &kv_buf);
+        encode_message_field_in_place(buf, 9, |buf| {
+            encode_key_value(buf, kv);
+        });
     }
 
     if let Some(ref status) = span.status {
-        let mut status_buf = Vec::new();
-        encode_status(&mut status_buf, status);
-        encode_message_field(buf, 15, &status_buf);
+        encode_message_field_in_place(buf, 15, |buf| {
+            encode_status(buf, status);
+        });
     }
 }
 
@@ -137,36 +137,33 @@ fn encode_span(buf: &mut Vec<u8>, span: &SpanData) {
 ///   ExportTraceServiceRequest { resource_spans: \[ResourceSpans\] }
 ///     ResourceSpans { resource(1), scope_spans(2) }
 ///       ScopeSpans { scope(1), spans(2) }
-pub(crate) fn encode_export_trace_request(
+pub fn encode_export_trace_request(
     resource_attrs: &[KeyValue],
     scope_name: &str,
     scope_version: &str,
     spans: &[SpanData],
 ) -> Vec<u8> {
-    let mut spans_buf = Vec::new();
-    for span in spans {
-        let mut span_buf = Vec::new();
-        encode_span(&mut span_buf, span);
-        encode_message_field(&mut spans_buf, 2, &span_buf);
-    }
-
-    let mut scope_buf = Vec::new();
-    encode_scope(&mut scope_buf, scope_name, scope_version);
-
-    let mut scope_spans_buf = Vec::new();
-    encode_message_field(&mut scope_spans_buf, 1, &scope_buf);
-    scope_spans_buf.extend_from_slice(&spans_buf);
-
-    let mut resource_buf = Vec::new();
-    encode_resource(&mut resource_buf, resource_attrs);
-
-    let mut resource_spans_buf = Vec::new();
-    encode_message_field(&mut resource_spans_buf, 1, &resource_buf);
-    encode_message_field(&mut resource_spans_buf, 2, &scope_spans_buf);
-
     let mut request_buf = Vec::new();
-    encode_message_field(&mut request_buf, 1, &resource_spans_buf);
-
+    // ResourceSpans (field 1 of ExportTraceServiceRequest)
+    encode_message_field_in_place(&mut request_buf, 1, |buf| {
+        // Resource (field 1 of ResourceSpans)
+        encode_message_field_in_place(buf, 1, |buf| {
+            encode_resource(buf, resource_attrs);
+        });
+        // ScopeSpans (field 2 of ResourceSpans)
+        encode_message_field_in_place(buf, 2, |buf| {
+            // InstrumentationScope (field 1 of ScopeSpans)
+            encode_message_field_in_place(buf, 1, |buf| {
+                encode_scope(buf, scope_name, scope_version);
+            });
+            // Spans (field 2 of ScopeSpans, repeated)
+            for span in spans {
+                encode_message_field_in_place(buf, 2, |buf| {
+                    encode_span(buf, span);
+                });
+            }
+        });
+    });
     request_buf
 }
 

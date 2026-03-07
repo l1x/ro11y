@@ -36,14 +36,14 @@ fn encode_log_record(buf: &mut Vec<u8>, log: &LogData) {
     encode_varint_field(buf, 2, log.severity_number as u64);
     encode_string_field(buf, 3, &log.severity_text);
 
-    let mut body_buf = Vec::new();
-    encode_any_value(&mut body_buf, &log.body);
-    encode_message_field(buf, 5, &body_buf);
+    encode_message_field_in_place(buf, 5, |buf| {
+        encode_any_value(buf, &log.body);
+    });
 
     for kv in &log.attributes {
-        let mut kv_buf = Vec::new();
-        encode_key_value(&mut kv_buf, kv);
-        encode_message_field(buf, 6, &kv_buf);
+        encode_message_field_in_place(buf, 6, |buf| {
+            encode_key_value(buf, kv);
+        });
     }
 
     encode_bytes_field(buf, 9, &log.trace_id);
@@ -56,36 +56,33 @@ fn encode_log_record(buf: &mut Vec<u8>, log: &LogData) {
 ///   ExportLogsServiceRequest { resource_logs: \[ResourceLogs\] }
 ///     ResourceLogs { resource(1), scope_logs(2) }
 ///       ScopeLogs { scope(1), log_records(2) }
-pub(crate) fn encode_export_logs_request(
+pub fn encode_export_logs_request(
     resource_attrs: &[KeyValue],
     scope_name: &str,
     scope_version: &str,
     logs: &[LogData],
 ) -> Vec<u8> {
-    let mut logs_buf = Vec::new();
-    for log in logs {
-        let mut log_buf = Vec::new();
-        encode_log_record(&mut log_buf, log);
-        encode_message_field(&mut logs_buf, 2, &log_buf);
-    }
-
-    let mut scope_buf = Vec::new();
-    encode_scope(&mut scope_buf, scope_name, scope_version);
-
-    let mut scope_logs_buf = Vec::new();
-    encode_message_field(&mut scope_logs_buf, 1, &scope_buf);
-    scope_logs_buf.extend_from_slice(&logs_buf);
-
-    let mut resource_buf = Vec::new();
-    encode_resource(&mut resource_buf, resource_attrs);
-
-    let mut resource_logs_buf = Vec::new();
-    encode_message_field(&mut resource_logs_buf, 1, &resource_buf);
-    encode_message_field(&mut resource_logs_buf, 2, &scope_logs_buf);
-
     let mut request_buf = Vec::new();
-    encode_message_field(&mut request_buf, 1, &resource_logs_buf);
-
+    // ResourceLogs (field 1 of ExportLogsServiceRequest)
+    encode_message_field_in_place(&mut request_buf, 1, |buf| {
+        // Resource (field 1 of ResourceLogs)
+        encode_message_field_in_place(buf, 1, |buf| {
+            encode_resource(buf, resource_attrs);
+        });
+        // ScopeLogs (field 2 of ResourceLogs)
+        encode_message_field_in_place(buf, 2, |buf| {
+            // InstrumentationScope (field 1 of ScopeLogs)
+            encode_message_field_in_place(buf, 1, |buf| {
+                encode_scope(buf, scope_name, scope_version);
+            });
+            // LogRecords (field 2 of ScopeLogs, repeated)
+            for log in logs {
+                encode_message_field_in_place(buf, 2, |buf| {
+                    encode_log_record(buf, log);
+                });
+            }
+        });
+    });
     request_buf
 }
 

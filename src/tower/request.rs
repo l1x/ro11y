@@ -50,7 +50,7 @@ where
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let method = req.method().to_string();
-        let uri = req.uri().to_string();
+        let uri = req.uri().path().to_string();
 
         let request_id = req
             .headers()
@@ -219,6 +219,28 @@ mod tests {
         let req = Request::builder().body(String::new()).unwrap();
 
         let resp = svc.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn middleware_strips_query_params_from_uri() {
+        let svc = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(Response::new(String::from("ok")))
+        });
+        let mut svc = CfRequestIdLayer.layer(svc);
+
+        let req = Request::builder()
+            .uri("/api/resource?token=secret&foo=bar")
+            .body(String::new())
+            .unwrap();
+
+        // Use poll_ready + call so we can inspect the future's uri field
+        std::future::poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+        let fut = svc.call(req);
+        // The uri stored in the future should be path-only
+        assert_eq!(fut.uri, "/api/resource");
+        assert!(!fut.uri.contains("secret"));
+        let resp = fut.await.unwrap();
         assert_eq!(resp.status(), 200);
     }
 

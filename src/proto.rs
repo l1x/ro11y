@@ -72,6 +72,7 @@ pub(crate) fn encode_fixed64_field_always(buf: &mut Vec<u8>, field: u32, val: u6
 
 /// Encode a nested message field (tag + length + message bytes).
 /// Skips the field if the message is empty.
+#[cfg(test)]
 pub(crate) fn encode_message_field(buf: &mut Vec<u8>, field: u32, msg: &[u8]) {
     if msg.is_empty() {
         return;
@@ -79,6 +80,76 @@ pub(crate) fn encode_message_field(buf: &mut Vec<u8>, field: u32, msg: &[u8]) {
     encode_tag(buf, field, WIRE_TYPE_LENGTH_DELIMITED);
     encode_varint(buf, msg.len() as u64);
     buf.extend_from_slice(msg);
+}
+
+/// Encode a nested message field in-place using a closure.
+///
+/// Instead of allocating a temporary `Vec<u8>` for the message body,
+/// this writes the tag, reserves space for the length, lets the closure
+/// write the body directly into `buf`, then patches the length.
+///
+/// Skips the field entirely if the closure produces an empty body.
+pub fn encode_message_field_in_place<F>(buf: &mut Vec<u8>, field: u32, f: F)
+where
+    F: FnOnce(&mut Vec<u8>),
+{
+    // Write tag
+    encode_tag(buf, field, WIRE_TYPE_LENGTH_DELIMITED);
+    let tag_end = buf.len();
+
+    // Reserve 5 bytes for the length (max varint32 size)
+    const MAX_LEN_BYTES: usize = 5;
+    buf.extend_from_slice(&[0u8; MAX_LEN_BYTES]);
+    let body_start = buf.len();
+
+    // Let the closure write the body
+    f(buf);
+
+    let body_len = buf.len() - body_start;
+
+    if body_len == 0 {
+        // Empty body — remove the tag + reserved length bytes
+        buf.truncate(tag_end - varint_tag_len(field));
+        return;
+    }
+
+    // Encode the actual length as a varint into a small stack buffer
+    let mut len_buf = [0u8; MAX_LEN_BYTES];
+    let varint_len = encode_varint_to_slice(&mut len_buf, body_len as u64);
+
+    if varint_len < MAX_LEN_BYTES {
+        // Copy the varint into the reserved slot
+        buf.copy_within(body_start..body_start + body_len, tag_end + varint_len);
+        buf[tag_end..tag_end + varint_len].copy_from_slice(&len_buf[..varint_len]);
+        buf.truncate(tag_end + varint_len + body_len);
+    } else {
+        // Exactly 5 bytes — just overwrite in place
+        buf[tag_end..tag_end + MAX_LEN_BYTES].copy_from_slice(&len_buf);
+    }
+}
+
+/// Encode a varint into a fixed-size slice, returning the number of bytes written.
+fn encode_varint_to_slice(out: &mut [u8; 5], mut val: u64) -> usize {
+    let mut i = 0;
+    while val >= 0x80 {
+        out[i] = (val as u8) | 0x80;
+        val >>= 7;
+        i += 1;
+    }
+    out[i] = val as u8;
+    i + 1
+}
+
+/// Return the number of bytes a varint-encoded tag occupies.
+fn varint_tag_len(field: u32) -> usize {
+    let tag_val = (field as u64) << 3 | WIRE_TYPE_LENGTH_DELIMITED as u64;
+    let mut v = tag_val;
+    let mut n = 1;
+    while v >= 0x80 {
+        v >>= 7;
+        n += 1;
+    }
+    n
 }
 
 #[cfg(test)]
@@ -196,5 +267,67 @@ mod tests {
         let mut buf = Vec::new();
         encode_bytes_field(&mut buf, 1, &[0xDE, 0xAD]);
         assert_eq!(buf, vec![0x0A, 0x02, 0xDE, 0xAD]);
+    }
+
+    #[test]
+    fn encode_message_field_in_place_matches_original() {
+        // Build with original approach
+        let mut inner = Vec::new();
+        encode_string_field(&mut inner, 1, "ab");
+        let mut expected = Vec::new();
+        encode_message_field(&mut expected, 2, &inner);
+
+        // Build with in-place approach
+        let mut actual = Vec::new();
+        encode_message_field_in_place(&mut actual, 2, |buf| {
+            encode_string_field(buf, 1, "ab");
+        });
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn encode_message_field_in_place_empty_body_is_skipped() {
+        let mut buf = Vec::new();
+        encode_message_field_in_place(&mut buf, 2, |_buf| {
+            // write nothing
+        });
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn encode_message_field_in_place_nested() {
+        // Nested in-place: outer message containing inner message
+        let mut expected_inner = Vec::new();
+        encode_string_field(&mut expected_inner, 1, "hello");
+        let mut expected_mid = Vec::new();
+        encode_message_field(&mut expected_mid, 1, &expected_inner);
+        let mut expected = Vec::new();
+        encode_message_field(&mut expected, 2, &expected_mid);
+
+        let mut actual = Vec::new();
+        encode_message_field_in_place(&mut actual, 2, |buf| {
+            encode_message_field_in_place(buf, 1, |buf| {
+                encode_string_field(buf, 1, "hello");
+            });
+        });
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn encode_message_field_in_place_large_body() {
+        // Body > 127 bytes requires multi-byte varint length
+        let large_data = vec![0x42u8; 200];
+
+        let mut expected = Vec::new();
+        encode_message_field(&mut expected, 1, &large_data);
+
+        let mut actual = Vec::new();
+        encode_message_field_in_place(&mut actual, 1, |buf| {
+            buf.extend_from_slice(&large_data);
+        });
+
+        assert_eq!(actual, expected);
     }
 }
