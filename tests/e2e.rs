@@ -79,8 +79,10 @@ async fn init_creates_spans_that_arrive_as_otlp_protobuf() {
         environment: "test",
         otlp_traces_endpoint: Some(endpoint),
         otlp_logs_endpoint: Some(endpoint),
+        otlp_metrics_endpoint: None,
         log_to_stderr: false,
         use_metrics_interval: None,
+        metrics_flush_interval: None,
     });
 
     // Create a span with a known trace_id

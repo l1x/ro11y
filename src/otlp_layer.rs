@@ -335,7 +335,11 @@ mod tests {
         let exporter = Exporter::start(ExporterConfig {
             traces_url: Some("http://127.0.0.1:1/v1/traces".to_string()),
             logs_url: Some("http://127.0.0.1:1/v1/logs".to_string()),
+            metrics_url: None,
             channel_capacity: 64,
+            batch_size: 512,
+            flush_interval: std::time::Duration::from_secs(1),
+            max_concurrent_exports: 4,
         });
         let _layer = OtlpLayer::new(exporter, "test-svc", "0.0.1", "test", true, true);
     }
