@@ -152,7 +152,10 @@ fn level_to_severity(level: &tracing::Level) -> SeverityNumber {
 /// Deterministic sampling decision based on trace_id.
 /// Uses the first 8 bytes of trace_id as a u64, maps to [0.0, 1.0) and compares
 /// against the sampling rate. The same trace_id always produces the same decision.
-fn should_sample(trace_id: [u8; 16], sampling_rate: f64) -> bool {
+/// Deterministic sampling decision based on trace_id.
+/// Uses the first 8 bytes of trace_id as a u64, maps to [0.0, 1.0) and compares
+/// against the sampling rate. The same trace_id always produces the same decision.
+pub fn should_sample(trace_id: [u8; 16], sampling_rate: f64) -> bool {
     if sampling_rate >= 1.0 {
         return true;
     }
@@ -759,5 +762,44 @@ mod tests {
 
         let msg = rx.recv().await.expect("standalone event should be exported");
         assert!(matches!(msg, ExportMessage::Logs(_)));
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn should_sample_boundary() {
+        let trace_id: [u8; 16] = kani::any();
+        // rate >= 1.0 → always true
+        assert!(should_sample(trace_id, 1.0));
+        // rate <= 0.0 → always false
+        assert!(!should_sample(trace_id, 0.0));
+        // rate 0.5 → exercises the hash path; no panics
+        let _ = should_sample(trace_id, 0.5);
+    }
+
+    #[kani::proof]
+    fn hex_nibble_all_bytes() {
+        let b: u8 = kani::any();
+        let result = hex_nibble(b);
+        if (b >= b'0' && b <= b'9') || (b >= b'a' && b <= b'f') || (b >= b'A' && b <= b'F') {
+            assert!(result.is_some());
+            assert!(result.unwrap() < 16);
+        } else {
+            assert!(result.is_none());
+        }
+    }
+
+    #[kani::proof]
+    fn hex_to_bytes_16_length_check() {
+        let len: usize = kani::any();
+        kani::assume(len <= 64);
+        kani::assume(len != 32);
+        let buf: [u8; 64] = [b'0'; 64];
+        // SAFETY: all bytes are 0x30 ('0'), valid UTF-8
+        let s = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
+        assert!(hex_to_bytes_16(s).is_err());
     }
 }

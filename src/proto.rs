@@ -72,8 +72,8 @@ pub(crate) fn encode_fixed64_field_always(buf: &mut Vec<u8>, field: u32, val: u6
 
 /// Encode a nested message field (tag + length + message bytes).
 /// Skips the field if the message is empty.
-#[cfg(test)]
-pub(crate) fn encode_message_field(buf: &mut Vec<u8>, field: u32, msg: &[u8]) {
+#[cfg(any(test, feature = "_bench"))]
+pub fn encode_message_field(buf: &mut Vec<u8>, field: u32, msg: &[u8]) {
     if msg.is_empty() {
         return;
     }
@@ -329,5 +329,104 @@ mod tests {
         });
 
         assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(11)]
+    fn encode_varint_no_panic() {
+        let val: u64 = kani::any();
+        let mut buf = Vec::new();
+        encode_varint(&mut buf, val);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(11)]
+    fn encode_varint_max_len() {
+        let val: u64 = kani::any();
+        let mut buf = Vec::new();
+        encode_varint(&mut buf, val);
+        assert!(buf.len() <= 10);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn encode_tag_no_panic() {
+        let field_number: u32 = kani::any();
+        let wire_type: u8 = kani::any();
+        let mut buf = Vec::new();
+        encode_tag(&mut buf, field_number, wire_type);
+    }
+
+    #[kani::proof]
+    fn encode_varint_field_zero_empty() {
+        let field: u32 = kani::any();
+        let mut buf = Vec::new();
+        encode_varint_field(&mut buf, field, 0);
+        assert!(buf.is_empty());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn encode_varint_field_always_zero_nonempty() {
+        let field: u32 = kani::any();
+        let mut buf = Vec::new();
+        encode_varint_field_always(&mut buf, field, 0);
+        assert!(!buf.is_empty());
+    }
+
+    #[kani::proof]
+    fn encode_bytes_field_empty_noop() {
+        let field: u32 = kani::any();
+        let mut buf = Vec::new();
+        encode_bytes_field(&mut buf, field, &[]);
+        assert!(buf.is_empty());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn encode_fixed64_field_size() {
+        let field: u32 = kani::any();
+        let val: u64 = kani::any();
+        kani::assume(val != 0);
+        let mut buf = Vec::new();
+        encode_fixed64_field(&mut buf, field, val);
+        // Compute expected tag varint length
+        let tag_val = ((field as u64) << 3) | WIRE_TYPE_FIXED64 as u64;
+        let mut v = tag_val;
+        let mut tag_len: usize = 1;
+        while v >= 0x80 {
+            v >>= 7;
+            tag_len += 1;
+        }
+        assert!(buf.len() == tag_len + 8);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn encode_varint_to_slice_no_panic() {
+        let val: u64 = kani::any();
+        kani::assume(val <= u32::MAX as u64);
+        let mut out = [0u8; 5];
+        let n = encode_varint_to_slice(&mut out, val);
+        assert!(n >= 1 && n <= 5);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn encode_message_field_in_place_no_panic() {
+        let field: u32 = kani::any();
+        kani::assume(field > 0 && field <= 100);
+        let body: [u8; 4] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 4);
+        let mut buf = Vec::new();
+        encode_message_field_in_place(&mut buf, field, |buf| {
+            buf.extend_from_slice(&body[..len]);
+        });
     }
 }

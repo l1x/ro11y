@@ -9,6 +9,9 @@ keywords = ["observability", "tracing", "otlp", "telemetry", "protobuf"]
 categories = ["development-tools::debugging", "development-tools::profiling"]
 readme = "README.md"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [features]
 default = ["tower"]
 tower = ["dep:tower", "dep:http", "dep:pin-project-lite"]
@@ -32,6 +35,9 @@ libc = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+opentelemetry-proto = { version = "0.31", features = ["gen-tonic-messages"] }
+proptest = "1"
+prost = "0.14"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 tower = { version = "0.5", features = ["util"] }
 

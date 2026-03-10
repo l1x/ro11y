@@ -276,13 +276,27 @@ pub mod bench {
     pub use crate::metrics::{
         counter, gauge, global_registry, Counter, Gauge, MetricSnapshot, MetricsRegistry,
     };
+    pub fn should_sample(trace_id: [u8; 16], sampling_rate: f64) -> bool {
+        crate::otlp_layer::should_sample(trace_id, sampling_rate)
+    }
     pub use crate::otlp_log::{encode_export_logs_request, LogData, SeverityNumber};
     pub use crate::otlp_metrics::encode_export_metrics_request;
     pub use crate::otlp_trace::{
         encode_export_trace_request, encode_key_value, encode_resource, AnyValue, KeyValue,
         SpanData, SpanKind, SpanStatus, StatusCode,
     };
-    pub use crate::proto::encode_message_field_in_place;
+    pub use crate::proto::{encode_message_field, encode_message_field_in_place};
+
+    // Thin wrappers for pub(crate) proto functions
+    pub fn encode_varint_field(buf: &mut Vec<u8>, field: u32, val: u64) {
+        crate::proto::encode_varint_field(buf, field, val);
+    }
+    pub fn encode_string_field(buf: &mut Vec<u8>, field: u32, s: &str) {
+        crate::proto::encode_string_field(buf, field, s);
+    }
+    pub fn encode_bytes_field(buf: &mut Vec<u8>, field: u32, data: &[u8]) {
+        crate::proto::encode_bytes_field(buf, field, data);
+    }
 }
 
 #[cfg(test)]
