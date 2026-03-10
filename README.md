@@ -13,7 +13,8 @@ ro11y has two layers:
 - Dual output: OTLP HTTP primary + JSON stderr fallback (local dev / CloudWatch)
 - Background exporter with batching (512 items / 1s window), concurrent workers, and 3-retry exponential backoff — telemetry never blocks your application
 - Probabilistic head-based trace sampling — deterministic based on trace_id, so the same trace gets the same decision across services
-- Native OTLP metrics with Counter and Gauge instruments, client-side aggregation, and `ExportMetricsServiceRequest` export
+- Native OTLP metrics with Counter, Gauge, and Histogram instruments, client-side aggregation, and `ExportMetricsServiceRequest` export
+- Automatic exemplar capture — metric data points are annotated with trace_id + span_id from the active span, enabling drill-down from metric spikes to traces
 - Process metrics (CPU, memory) via `/proc` polling on Linux
 
 **HTTP middleware** (optional, `tower` feature) — framework-specific request instrumentation:
@@ -37,10 +38,10 @@ All three signals follow the [OTLP specification](https://opentelemetry.io/docs/
 
 ### Metrics
 
-ro11y provides Counter and Gauge instruments with client-side aggregation. Metrics are accumulated in-process and flushed as `ExportMetricsServiceRequest` on a configurable interval (default 10s).
+ro11y provides Counter, Gauge, and Histogram instruments with client-side aggregation. Metrics are accumulated in-process and flushed as `ExportMetricsServiceRequest` on a configurable interval (default 10s).
 
 ```rust
-use ro11y::{counter, gauge};
+use ro11y::{counter, gauge, histogram};
 
 // Counters are monotonic and cumulative
 let req_counter = counter("http.server.requests", "Total HTTP requests");
@@ -49,9 +50,19 @@ req_counter.add(1, &[("method", "GET"), ("status", "200")]);
 // Gauges record last-value
 let mem_gauge = gauge("process.memory.usage", "Memory usage in bytes");
 mem_gauge.set(1_048_576.0, &[("unit", "bytes")]);
+
+// Histograms with configurable bucket boundaries
+let latency = histogram(
+    "http.server.duration",
+    "Request latency in seconds",
+    &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+);
+latency.observe(0.042, &[("method", "GET"), ("route", "/api/users")]);
 ```
 
 Attribute order does not matter — `[("a", "1"), ("b", "2")]` and `[("b", "2"), ("a", "1")]` aggregate to the same data point.
+
+When called inside a tracing span, metric recordings automatically capture an **exemplar** with the current `trace_id` and `span_id`. This lets you click from a latency spike on a dashboard straight to the offending trace — no configuration needed.
 
 ## Usage
 
@@ -60,12 +71,12 @@ use ro11y::{init, TelemetryConfig};
 use std::time::Duration;
 
 let _guard = init(TelemetryConfig {
-    service_name: "my-service",
-    service_version: env!("CARGO_PKG_VERSION"),
-    environment: "prod",
-    otlp_traces_endpoint: Some("http://vector:4318"),
-    otlp_logs_endpoint: Some("http://vector:4318"),
-    otlp_metrics_endpoint: Some("http://vector:4318"),
+    service_name: "my-service".into(),
+    service_version: env!("CARGO_PKG_VERSION").into(),
+    environment: "prod".into(),
+    otlp_traces_endpoint: Some("http://vector:4318".into()),
+    otlp_logs_endpoint: Some("http://vector:4318".into()),
+    otlp_metrics_endpoint: Some("http://vector:4318".into()),
     log_to_stderr: true,
     use_metrics_interval: Some(Duration::from_secs(30)),
     metrics_flush_interval: None, // default 10s
@@ -82,12 +93,12 @@ Endpoints can be configured independently — send traces to Jaeger, logs to Vec
 
 ```rust
 let _guard = init(TelemetryConfig {
-    service_name: "my-service",
-    service_version: env!("CARGO_PKG_VERSION"),
-    environment: "prod",
-    otlp_traces_endpoint: Some("http://jaeger:4318"),
-    otlp_logs_endpoint: Some("http://vector:4318"),
-    otlp_metrics_endpoint: Some("http://prometheus-gateway:4318"),
+    service_name: "my-service".into(),
+    service_version: env!("CARGO_PKG_VERSION").into(),
+    environment: "prod".into(),
+    otlp_traces_endpoint: Some("http://jaeger:4318".into()),
+    otlp_logs_endpoint: Some("http://vector:4318".into()),
+    otlp_metrics_endpoint: Some("http://prometheus-gateway:4318".into()),
     log_to_stderr: false,
     use_metrics_interval: None,
     metrics_flush_interval: Some(Duration::from_secs(15)),
@@ -123,7 +134,7 @@ To disable Tower middleware (e.g. for non-HTTP applications):
 
 ```toml
 [dependencies]
-ro11y = { version = "0.4", default-features = false }
+ro11y = { version = "0.5", default-features = false }
 ```
 
 ## Pipeline
